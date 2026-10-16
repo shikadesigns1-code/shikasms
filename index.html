@@ -1,0 +1,59 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bulk SMS</title>
+<style>
+:root{--bg:#f6f7f9;--c:#fff;--t:#16181d;--m:#6b7280;--b:#e3e6ea;--a:#0b6b4f}
+@media(prefers-color-scheme:dark){:root{--bg:#111316;--c:#1a1d21;--t:#e8eaed;--m:#9aa0a6;--b:#2c3036;--a:#3ecf9a}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+main{max-width:860px;margin:auto;padding:16px}.card{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:16px;margin:12px 0}
+input,textarea,select{width:100%;padding:9px;border:1px solid var(--b);border-radius:6px;background:var(--bg);color:var(--t);font:inherit}
+button{padding:9px 14px;border:0;border-radius:6px;background:var(--a);color:#fff;font:inherit;cursor:pointer}button.g{background:none;color:var(--t);border:1px solid var(--b)}
+button:disabled{opacity:.5}nav{display:flex;gap:6px;flex-wrap:wrap}nav button{background:none;color:var(--t);border:1px solid var(--b)}nav button.on{background:var(--a);color:#fff}
+.m{color:var(--m);font-size:13px}table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px;border-bottom:1px solid var(--b);text-align:left}
+.tw{overflow-x:auto}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row>*{flex:1}.pv{background:var(--bg);padding:10px;border-radius:6px;margin:6px 0;white-space:pre-wrap}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--b);font-size:12px;margin:2px;cursor:pointer}
+.warn{background:#fff3cd;color:#664d03;padding:8px 12px;border-radius:6px;font-size:13px}
+</style></head><body><main id="app"></main>
+<script>
+const $=(s,e=document)=>e.querySelector(s),api=async(p,m='GET',b)=>{const r=await fetch('/api/'+p,{method:m,headers:{'content-type':'application/json',authorization:'Bearer '+(sessionStorage.t||'')},body:b?JSON.stringify(b):undefined});if(r.status===401&&p!=='login'){delete sessionStorage.t;location.reload()}const j=await r.json();if(!r.ok)throw Error(j.error||'Error');return j};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let S={contacts:[],optouts:{},campaigns:[]},tab='contacts',rows=null,headers=[];
+const render=(t,c)=>t.replace(/\{\{\s*(\w+)\s*\}\}/g,(_,k)=>c[k.toLowerCase()]??'').replace(/\s+/g,' ').trim();
+const FOOT=' Reply STOP to opt out.';
+function csv(t){const o=[];let r=[],f='',q=false;for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=c}else if(c=='"')q=true;else if(c==','){r.push(f);f=''}else if(c=='\n'||c=='\r'){if(c=='\r'&&t[i+1]=='\n')i++;r.push(f);f='';if(r.some(x=>x.trim()))o.push(r);r=[]}else f+=c}r.push(f);if(r.some(x=>x.trim()))o.push(r);return o}
+async function load(){S=await api('state');draw()}
+function login(){$('#app').innerHTML=`<div class="card"><h2>Bulk SMS</h2><input id=pw type=password placeholder=Password><p><button id=go>Sign in</button> <span id=er class=m></span></p></div>`;
+const go=async()=>{try{sessionStorage.t=(await api('login','POST',{password:$('#pw').value})).token;load()}catch(e){$('#er').textContent=e.message}};$('#go').onclick=go;$('#pw').onkeydown=e=>e.key=='Enter'&&go()}
+function draw(){const a=$('#app'),oc=Object.keys(S.optouts).length;
+a.innerHTML=`<h2>Bulk SMS</h2>${S.provider=='mock'?'<div class=warn>Mock mode: no real SMS are sent. Set SMS_PROVIDER and SMS_API_KEY to go live.</div>':''}
+<nav>${['contacts','campaign','optouts','reports'].map(t=>`<button class="${t==tab?'on':''}" data-t=${t}>${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</nav><div id=v></div>`;
+a.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;draw()});({contacts:vContacts,campaign:vCampaign,optouts:vOpt,reports:vReports})[tab]($('#v'),oc)}
+function vContacts(v,oc){v.innerHTML=`<div class=card><b>${S.contacts.length}</b> contacts · <b>${oc}</b> opted out
+<p class=m>CSV with a header row. Ghana numbers like 024xxxxxxx are converted to 233 format. Other columns (name, amount, due_date…) become {{variables}}.</p>
+<input type=file id=f accept=".csv,text/csv"><div id=map></div>
+<p><button class=g id=clr>Delete all contacts</button></p></div>
+<div class="card tw"><table><tr><th>Phone<th>Name<th>Other</tr>${S.contacts.slice(0,50).map(c=>`<tr><td>${esc(c.phone)}<td>${esc(c.name)}<td class=m>${esc(Object.entries(c).filter(([k])=>!['phone','name'].includes(k)).map(([k,x])=>k+': '+x).join(', '))}</tr>`).join('')}</table><p class=m>Showing first 50.</p></div>`;
+$('#clr').onclick=async()=>{if(confirm('Delete all contacts?')){await api('contacts','DELETE');load()}};
+$('#f').onchange=async e=>{const d=csv(await e.target.files[0].text());headers=d[0].map(h=>h.trim().toLowerCase().replace(/\W+/g,'_'));rows=d.slice(1).map(r=>Object.fromEntries(headers.map((h,i)=>[h,(r[i]||'').trim()])));
+const g=headers.find(h=>/phone|mobile|msisdn|number|tel/.test(h))||headers[0];
+$('#map').innerHTML=`<p>${rows.length} rows. Phone column: <select id=pc>${headers.map(h=>`<option ${h==g?'selected':''}>${esc(h)}</option>`).join('')}</select></p><button id=imp>Import</button> <span id=ms class=m></span>`;
+$('#imp').onclick=async()=>{const pc=$('#pc').value;let tot=0,bad=0;for(let i=0;i<rows.length;i+=500){const r=await api('contacts','POST',{contacts:rows.slice(i,i+500).map(x=>({...x,phone:x[pc]}))});tot=r.total;bad+=r.invalid;$('#ms').textContent='Importing '+Math.min(i+500,rows.length)+'/'+rows.length}$('#ms').textContent=`Done. ${bad} invalid numbers skipped.`;load()}}}
+function vCampaign(v){const vars=[...new Set(S.contacts.flatMap(c=>Object.keys(c)))].filter(k=>k!='phone');
+v.innerHTML=`<div class=card><div class=row><input id=nm placeholder="Campaign name"><input id=sd maxlength=11 placeholder="Sender ID (max 11)" value="${esc(S.sender)}"></div>
+<p><textarea id=tp rows=4 placeholder="Hi {{name}}, you may qualify for a loan of up to GHS 5,000. Visit our branch or call 0XX XXX XXXX."></textarea></p>
+<div>${vars.map(k=>`<span class=pill data-v=${k}>{{${k}}}</span>`).join('')}</div><div id=pv></div>
+<p><label><input type=checkbox id=cs style="width:auto"> I confirm every contact on this list has consented to receive marketing SMS from my business and I'm licensed to offer these loans.</label></p>
+<button id=snd>Send campaign</button> <span id=st class=m></span></div>`;
+const pv=()=>{const t=$('#tp').value,live=S.contacts.filter(c=>!S.optouts[c.phone]);const sample=live.slice(0,3);const L=Math.max(0,...sample.map(c=>(render(t,c)+FOOT).length),(t+FOOT).length);const uni=/[^\x00-\x7F]/.test(t);const seg=uni?Math.ceil(L/(L>70?67:70)):Math.ceil(L/(L>160?153:160));
+$('#pv').innerHTML=`<p class=m>Preview · ${live.length} recipients (${S.contacts.length-live.length} opted-out excluded) · ~${L} chars, ${seg||0} SMS part(s) each${uni?' (unicode)':''}</p>${sample.map(c=>`<div class=pv>${esc(render(t,c)+FOOT)}<div class=m>→ ${esc(c.phone)}</div></div>`).join('')||'<p class=m>Import contacts first.</p>'}`};
+$('#tp').oninput=pv;v.querySelectorAll('.pill').forEach(p=>p.onclick=()=>{$('#tp').value+=`{{${p.dataset.v}}}`;pv()});pv();
+$('#snd').onclick=async()=>{const live=S.contacts.filter(c=>!S.optouts[c.phone]);if(!live.length||!$('#tp').value.trim())return alert('Need contacts and a message');if(!$('#cs').checked)return alert('Please confirm consent');if(!confirm(`Send to ${live.length} recipients${S.provider=='mock'?' (mock mode)':' via '+S.provider}?`))return;
+$('#snd').disabled=true;try{const c=await api('campaign','POST',{name:$('#nm').value,sender:$('#sd').value,template:$('#tp').value,consent:true});for(let i=0;i<live.length;i+=10){await api('send','POST',{campaignId:c.id,phones:live.slice(i,i+10).map(x=>x.phone)});$('#st').textContent=`Sent ${Math.min(i+10,live.length)}/${live.length}`}tab='reports';await load()}catch(e){alert(e.message)}$('#snd').disabled=false}}
+function vOpt(v){const o=Object.entries(S.optouts);v.innerHTML=`<div class=card><b>${o.length}</b> opted out. These numbers are never messaged.<p><textarea id=np rows=2 placeholder="Add numbers (comma or new line separated)"></textarea></p><button id=ad>Add to opt-out list</button>
+<p class=m>Inbound STOP replies are added automatically if your provider posts incoming SMS to <code>/api/inbound?secret=WEBHOOK_SECRET</code>.</p></div>
+<div class="card tw"><table>${o.map(([p,x])=>`<tr><td>${esc(p)}<td class=m>${esc(x.reason)} · ${x.at.slice(0,10)}<td><button class=g data-p=${esc(p)}>Remove</button></tr>`).join('')}</table></div>`;
+$('#ad').onclick=async()=>{await api('optouts','POST',{phones:$('#np').value.split(/[\s,;]+/).filter(Boolean)});load()};v.querySelectorAll('[data-p]').forEach(b=>b.onclick=async()=>{if(confirm('Only remove if the person re-consented. Continue?')){await api('optouts','DELETE',{phone:b.dataset.p});load()}})}
+function vReports(v){v.innerHTML=`<div class="card tw"><table><tr><th>Campaign<th>Date<th>Mode<th></tr>${S.campaigns.map(c=>`<tr><td>${esc(c.name)}<td>${c.at.slice(0,16).replace('T',' ')}<td>${c.provider}<td><button class=g data-c=${c.id}>View</button></tr>`).join('')}</table></div><div id=rp></div>`;
+v.querySelectorAll('[data-c]').forEach(b=>b.onclick=async()=>{const r=await api('report/'+b.dataset.c),n={};r.forEach(x=>n[x.status]=(n[x.status]||0)+1);
+$('#rp').innerHTML=`<div class="card tw"><p>${Object.entries(n).map(([k,x])=>`<span class=pill>${k}: ${x}</span>`).join('')} <button class=g id=rf>Refresh</button></p><p class=m>"delivered" appears only if your provider supports delivery callbacks to /api/dlr.</p><table><tr><th>Phone<th>Status<th>Error</tr>${r.map(x=>`<tr><td>${esc(x.phone)}<td>${x.status}<td class=m>${esc(x.error||'')}</tr>`).join('')}</table></div>`;$('#rf').onclick=()=>b.click()})}
+sessionStorage.t?load().catch(login):login();
+</script></body></html>
